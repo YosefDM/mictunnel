@@ -133,6 +133,7 @@
 <script>
 const RATE = 16000;
 const RING_LEN = 2 * Math.PI * 64;
+const WS_SUPERSEDED = 4001;  // must match server.py
 
 const els = {
   go: document.getElementById('go'),
@@ -148,7 +149,8 @@ const els = {
 els.ring.style.strokeDasharray = RING_LEN;
 els.ring.style.strokeDashoffset = RING_LEN;
 
-let ws, ctx, stream, node, running = false, sent = 0, startedAt = 0, reconnectDelay = 500;
+let ws, ctx, stream, node, keepAlive;
+let running = false, sent = 0, startedAt = 0, reconnectDelay = 500, lastFrameAt = 0;
 
 function setState(cls, label, hint) {
   document.body.className = cls;
@@ -198,8 +200,15 @@ function connect() {
     startedAt = startedAt || Date.now();
     setState('live', 'Live', 'Audio is streaming. Keep this tab open while using <code>/voice</code>.');
   };
-  ws.onclose = () => {
+  ws.onclose = (e) => {
     if (!running) return;
+    if (e.code === WS_SUPERSEDED) {
+      // Another tab took over on purpose. Stand down instead of reconnecting,
+      // or the two tabs would kick each other in an endless loop.
+      stop();
+      setState('err', 'Taken over', 'Another tab took over the microphone. Click the mic to take it back.');
+      return;
+    }
     setState('wait', 'Reconnecting…', 'Lost the connection to the container. Retrying automatically.');
     setTimeout(connect, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 5000);
@@ -244,13 +253,30 @@ async function start() {
 
     node = new AudioWorkletNode(ctx, 'pump');
     node.port.onmessage = (e) => {
+      lastFrameAt = Date.now();
       if (ws && ws.readyState === WebSocket.OPEN) { ws.send(e.data.pcm); sent++; }
       setLevel(e.data.peak);
     };
     ctx.createMediaStreamSource(stream).connect(node);
     node.connect(ctx.destination);
 
+    // An inaudible tone marks this tab as playing audio, which makes browsers
+    // far less willing to freeze or discard it in the background. Amplitude is
+    // ~ -80 dBFS: inaudible, but enough to count as active playback.
+    keepAlive = ctx.createOscillator();
+    const g = ctx.createGain();
+    g.gain.value = 0.0001;
+    keepAlive.connect(g);
+    g.connect(ctx.destination);
+    keepAlive.start();
+
+    // The mic can be revoked or the device unplugged out from under us.
+    stream.getAudioTracks().forEach(t => {
+      t.onended = () => { if (running) { stop(); start(); } };
+    });
+
     running = true;
+    lastFrameAt = Date.now();
     connect();
   } catch (err) {
     const msg = err.name === 'NotAllowedError'
@@ -277,7 +303,39 @@ function stop() {
 }
 
 els.go.onclick = () => (running ? stop() : start());
-listDevices();
+
+// A backgrounded tab can get its AudioContext suspended, or be discarded and
+// reloaded outright. Both look identical from the host side -- silence, no
+// error -- so recover automatically rather than waiting for a click.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && running && ctx && ctx.state === 'suspended') ctx.resume();
+});
+
+setInterval(() => {
+  if (!running) return;
+  const stalled = Date.now() - lastFrameAt > 3000;
+  if (!stalled) return;
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume();
+  } else {
+    // Audio stopped for some other reason; rebuild the whole graph.
+    stop();
+    start();
+  }
+}, 2000);
+
+// Re-arm after a reload without needing another click. getUserMedia does not
+// require a fresh gesture once the origin already holds mic permission, so a
+// tab the browser discarded and reloaded can put itself straight back to work.
+(async () => {
+  await listDevices();
+  try {
+    const p = await navigator.permissions.query({ name: 'microphone' });
+    if (p.state === 'granted') start();
+  } catch (_) {
+    // Firefox lacks the microphone permission name; the user clicks once.
+  }
+})();
 </script>
 </body>
 </html>

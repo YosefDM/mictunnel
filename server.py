@@ -6,14 +6,22 @@ rate, substituting silence whenever no client is streaming -- so consumers like
 `rec` see a continuously running capture device instead of a stalled one.
 """
 
+import contextlib
 import os
 import queue
 import secrets
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 from aiohttp import WSMsgType, web
+
+# Private close code (the 4000-4999 range is application-defined): tells a
+# displaced client it was replaced on purpose and should not reconnect.
+WS_SUPERSEDED = 4001
+
+active_ws: Optional[web.WebSocketResponse] = None
 
 FIFO = os.environ.get("MICTUNNEL_FIFO", "/tmp/mictunnel.fifo")
 PORT = int(os.environ.get("MICTUNNEL_PORT", "8777"))
@@ -102,11 +110,29 @@ def feeder() -> None:
 
 
 async def ws_handler(request: web.Request) -> web.WebSocketResponse:
+    global active_ws
+
     if not authorized(request):
         raise web.HTTPForbidden(text="bad token")
 
-    ws = web.WebSocketResponse(max_msg_size=0)
+    # heartbeat: ping the browser so an idle proxy can't silently drop the
+    # socket, and so a half-open connection surfaces as a close the page can
+    # reconnect from.
+    ws = web.WebSocketResponse(max_msg_size=0, heartbeat=20)
     await ws.prepare(request)
+
+    # One streamer at a time. Two clients feeding the same queue interleave
+    # into noise, so the newest wins. The displaced client is closed with
+    # WS_SUPERSEDED, which tells it to stand down rather than reconnect --
+    # otherwise two tabs would kick each other in a loop forever.
+    previous, active_ws = active_ws, ws
+    if previous is not None and not previous.closed:
+        print("[mictunnel] superseding earlier client", flush=True)
+        await previous.close(code=WS_SUPERSEDED, message=b"superseded")
+        with contextlib.suppress(queue.Empty):
+            while True:
+                audio_q.get_nowait()  # drop the old client's buffered audio
+
     print("[mictunnel] browser connected", flush=True)
 
     async for msg in ws:
@@ -119,6 +145,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
         elif msg.type == WSMsgType.ERROR:
             print(f"[mictunnel] ws error: {ws.exception()}", flush=True)
 
+    if active_ws is ws:
+        active_ws = None
     print("[mictunnel] browser disconnected", flush=True)
     return ws
 
