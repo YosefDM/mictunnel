@@ -1,6 +1,8 @@
 # virtmic
 
-**Use your laptop's microphone on a remote Linux box that has no sound card.**
+**Use your laptop's microphone on a remote Linux box that has no sound card — so voice input works in a Codespace, a container, or over SSH.**
+
+## What this solves
 
 Containers and cloud VMs — GitHub Codespaces, Docker, a bare DigitalOcean droplet — have no audio hardware. There's no `/dev/snd`, no ALSA cards, nothing. So any tool that wants to record fails immediately:
 
@@ -11,7 +13,23 @@ rec FAIL sox: Sorry, there is no default audio device configured
 
 Installing SoX doesn't help. The machine genuinely has no microphone, and your microphone is on your laptop, hundreds of miles away.
 
-virtmic bridges the gap. It captures audio in your browser, streams it to the remote host, and presents it there as a **real ALSA/PulseAudio capture device**. Anything that records — `rec`, `arecord`, `ffmpeg`, a voice-input CLI, a speech-to-text script — just works, with no awareness that the mic is somewhere else.
+## Why we built it
+
+To talk to **Claude Code's voice mode from a terminal running inside a GitHub Codespace.**
+
+If you develop in a Codespace, Claude Code runs in a container in a datacenter. Typing `/voice` gets you:
+
+```
+Voice mode requires a microphone, but SoX could not open an audio capture device.
+This usually means the host has no microphone (for example, a remote server).
+Run Claude Code on a machine with a microphone to use voice input.
+```
+
+That advice is correct but unsatisfying: your whole dev environment lives in the Codespace, and moving it to your laptop just to dictate is a big trade for a small feature. Your browser has your microphone and is already talking to the Codespace — the only thing missing is a path between the two. virtmic is that path.
+
+Nothing here is Claude Code specific, though. virtmic presents a **real ALSA/PulseAudio capture device**, so anything that records — `rec`, `arecord`, `ffmpeg`, a speech-to-text script — works unmodified, with no awareness that the microphone is a thousand miles away.
+
+## How it works
 
 ```
 browser (getUserMedia)
@@ -61,6 +79,26 @@ The server listens on port `8777` on the remote host. Get to it however you norm
 | Local Docker | `-p 8777:8777`, then open `http://localhost:8777` |
 
 `getUserMedia` requires a secure context, so the page must be on `https://` **or** `localhost`. An SSH tunnel satisfies this because the browser sees `localhost`. A bare `http://192.168.1.5:8777` will not work — the mic button will fail with `NotAllowedError`.
+
+## Using it with Claude Code voice mode
+
+Inside the Codespace (or wherever Claude Code is running):
+
+```bash
+./start.sh          # prints the page URL
+```
+
+Open the URL in your browser, click the mic, grant permission, and leave the tab open. Then, in the Claude Code terminal:
+
+```
+/voice
+```
+
+Hold space to talk. Claude Code shells out to SoX, SoX opens the ALSA default, and that now resolves to audio coming from your browser.
+
+**If `/voice` says the host has no microphone**, the virtual device isn't up — run `./start.sh` and check that `pactl list sources short` lists `virtmic`.
+
+**If `/voice` starts but transcribes nothing or garbage**, the device exists but no audio is reaching it. Ninety percent of the time the browser tab is closed. See Troubleshooting.
 
 ## After a restart
 
