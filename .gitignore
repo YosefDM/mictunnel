@@ -1,0 +1,5 @@
+token
+server.log
+__pycache__/
+*.pyc
+*.wav

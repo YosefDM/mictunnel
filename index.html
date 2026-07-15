@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>virtmic — browser mic bridge</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233ddc84' stroke-width='2' stroke-linecap='round'><rect x='9' y='2' width='6' height='12' rx='3'/><path d='M5 11a7 7 0 0 0 14 0'/><line x1='12' y1='18' x2='12' y2='22'/></svg>">
+<style>
+  :root {
+    --bg: #0f1014;
+    --card: #171920;
+    --line: #262932;
+    --text: #e8e9ed;
+    --dim: #8b8f9c;
+    --accent: #5b8cff;
+    --live: #3ddc84;
+    --warn: #ffb454;
+    --err: #ff6b6b;
+    --track: #262932;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: var(--bg); color: var(--text); padding: 1.5rem;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .card {
+    width: 100%; max-width: 26rem; background: var(--card);
+    border: 1px solid var(--line); border-radius: 1rem; padding: 2rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 12px 32px rgba(0,0,0,.08);
+  }
+  header { text-align: center; margin-bottom: 1.75rem; }
+  h1 {
+    font-size: 1.05rem; font-weight: 650; margin: 0 0 .3rem;
+    letter-spacing: -.01em;
+  }
+  .sub { font-size: .82rem; color: var(--dim); margin: 0; line-height: 1.5; }
+
+  /* Mic button with a level ring drawn around it */
+  .ring-wrap { position: relative; width: 132px; height: 132px; margin: 0 auto 1.5rem; }
+  svg.ring { position: absolute; inset: 0; transform: rotate(-90deg); }
+  svg.ring circle { fill: none; stroke-width: 4; }
+  .ring-track { stroke: var(--track); }
+  .ring-level {
+    stroke: var(--live); stroke-linecap: round;
+    transition: stroke-dashoffset .05s linear, stroke .3s ease;
+  }
+  button.mic {
+    position: absolute; inset: 14px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .12s ease, border-color .2s ease, background .2s ease;
+  }
+  button.mic:hover { transform: scale(1.03); border-color: var(--accent); }
+  button.mic:active { transform: scale(.97); }
+  button.mic:disabled { cursor: default; opacity: .6; transform: none; }
+  button.mic svg { width: 34px; height: 34px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+  body.live button.mic { border-color: var(--live); color: var(--live); }
+
+  .status {
+    display: flex; align-items: center; justify-content: center; gap: .5rem;
+    font-size: .85rem; font-weight: 550; margin-bottom: .35rem;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
+  body.live .dot { background: var(--live); animation: pulse 2s ease-in-out infinite; }
+  body.err .dot { background: var(--err); }
+  body.wait .dot { background: var(--warn); animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  .hint {
+    text-align: center; font-size: .78rem; color: var(--dim);
+    line-height: 1.55; min-height: 2.4em; margin: 0 0 1.25rem;
+  }
+  select {
+    width: 100%; font: inherit; font-size: .8rem; padding: .5rem .6rem;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: .5rem; margin-bottom: 1rem;
+  }
+  .stats {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem;
+    border-top: 1px solid var(--line); padding-top: 1rem;
+  }
+  .stat { text-align: center; }
+  .stat .v {
+    font-size: .9rem; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .stat .k {
+    font-size: .64rem; color: var(--dim); text-transform: uppercase;
+    letter-spacing: .05em; margin-top: .15rem;
+  }
+  code {
+    background: var(--track); padding: .08rem .3rem;
+    border-radius: .25rem; font-size: .95em;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <header>
+    <h1>virtmic</h1>
+    <p class="sub">Streams this browser's microphone into a remote container as a virtual capture device.</p>
+  </header>
+
+  <div class="ring-wrap">
+    <svg class="ring" viewBox="0 0 132 132">
+      <circle class="ring-track" cx="66" cy="66" r="64"></circle>
+      <circle class="ring-level" id="ring" cx="66" cy="66" r="64"></circle>
+    </svg>
+    <button class="mic" id="go" title="Start / stop microphone">
+      <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+        <path d="M5 11a7 7 0 0 0 14 0"></path>
+        <line x1="12" y1="18" x2="12" y2="22"></line>
+      </svg>
+    </button>
+  </div>
+
+  <div class="status"><span class="dot"></span><span id="state">Idle</span></div>
+  <p class="hint" id="hint">Click the mic to start streaming, then run <code>/voice</code>.</p>
+
+  <select id="devices" aria-label="Microphone"><option>Default microphone</option></select>
+
+  <div class="stats">
+    <div class="stat"><div class="v" id="s-rate">—</div><div class="k">Sample rate</div></div>
+    <div class="stat"><div class="v" id="s-sent">—</div><div class="k">Sent</div></div>
+    <div class="stat"><div class="v" id="s-up">—</div><div class="k">Uptime</div></div>
+  </div>
+</div>
+
+<script>
+const RATE = 16000;
+const RING_LEN = 2 * Math.PI * 64;
+
+const els = {
+  go: document.getElementById('go'),
+  state: document.getElementById('state'),
+  hint: document.getElementById('hint'),
+  ring: document.getElementById('ring'),
+  devices: document.getElementById('devices'),
+  rate: document.getElementById('s-rate'),
+  sent: document.getElementById('s-sent'),
+  up: document.getElementById('s-up'),
+};
+
+els.ring.style.strokeDasharray = RING_LEN;
+els.ring.style.strokeDashoffset = RING_LEN;
+
+let ws, ctx, stream, node, running = false, sent = 0, startedAt = 0, reconnectDelay = 500;
+
+function setState(cls, label, hint) {
+  document.body.className = cls;
+  els.state.textContent = label;
+  if (hint !== undefined) els.hint.innerHTML = hint;
+}
+function setLevel(v) {
+  els.ring.style.strokeDashoffset = RING_LEN * (1 - Math.min(1, v * 1.4));
+  els.ring.style.stroke = v > 0.92 ? 'var(--err)' : 'var(--live)';
+}
+
+function fmtCount(n) {
+  return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n);
+}
+setInterval(() => {
+  if (!running || !startedAt) return;
+  const s = Math.floor((Date.now() - startedAt) / 1000);
+  els.up.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  els.sent.textContent = fmtCount(sent);
+}, 500);
+
+async function listDevices() {
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    const mics = all.filter(d => d.kind === 'audioinput');
+    if (!mics.length || !mics[0].label) return;  // labels appear only after permission
+    els.devices.innerHTML = '';
+    for (const m of mics) {
+      const o = document.createElement('option');
+      o.value = m.deviceId;
+      o.textContent = m.label;
+      els.devices.appendChild(o);
+    }
+  } catch (_) { /* enumeration is best-effort */ }
+}
+
+function connect() {
+  // The container-side server restarts often during setup; reconnect rather
+  // than making the user reload and re-grant permission.
+  const url = (location.protocol === 'https:' ? 'wss://' : 'ws://')
+    + location.host + '/ws' + location.search;
+  ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    reconnectDelay = 500;
+    startedAt = startedAt || Date.now();
+    setState('live', 'Live', 'Audio is streaming. Keep this tab open while using <code>/voice</code>.');
+  };
+  ws.onclose = () => {
+    if (!running) return;
+    setState('wait', 'Reconnecting…', 'Lost the connection to the container. Retrying automatically.');
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 5000);
+  };
+  ws.onerror = () => { try { ws.close(); } catch (_) {} };
+}
+
+async function start() {
+  els.go.disabled = true;
+  try {
+    const id = els.devices.value;
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1, echoCancellation: true, noiseSuppression: true,
+        ...(id && id !== 'Default microphone' ? { deviceId: { exact: id } } : {}),
+      }
+    });
+    await listDevices();
+
+    ctx = new AudioContext({ sampleRate: RATE });
+    els.rate.textContent = (ctx.sampleRate / 1000).toFixed(0) + 'k';
+
+    const src = `
+      class Pump extends AudioWorkletProcessor {
+        process(inputs) {
+          const ch = inputs[0][0];
+          if (!ch) return true;
+          const pcm = new Int16Array(ch.length);
+          let peak = 0;
+          for (let i = 0; i < ch.length; i++) {
+            const s = Math.max(-1, Math.min(1, ch[i]));
+            pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            const a = Math.abs(s); if (a > peak) peak = a;
+          }
+          this.port.postMessage({ pcm: pcm.buffer, peak }, [pcm.buffer]);
+          return true;
+        }
+      }
+      registerProcessor('pump', Pump);
+    `;
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
+
+    node = new AudioWorkletNode(ctx, 'pump');
+    node.port.onmessage = (e) => {
+      if (ws && ws.readyState === WebSocket.OPEN) { ws.send(e.data.pcm); sent++; }
+      setLevel(e.data.peak);
+    };
+    ctx.createMediaStreamSource(stream).connect(node);
+    node.connect(ctx.destination);
+
+    running = true;
+    connect();
+  } catch (err) {
+    const msg = err.name === 'NotAllowedError'
+      ? 'Microphone permission denied. Allow it in the address bar, then try again.'
+      : err.name === 'NotFoundError'
+      ? 'No microphone found on this device.'
+      : err.message;
+    setState('err', 'Error', msg);
+  } finally {
+    els.go.disabled = false;
+  }
+}
+
+function stop() {
+  running = false;
+  startedAt = 0;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (ws) { try { ws.close(); } catch (_) {} }
+  if (ctx) ctx.close();
+  setLevel(0);
+  els.up.textContent = els.sent.textContent = els.rate.textContent = '—';
+  sent = 0;
+  setState('', 'Idle', 'Click the mic to start streaming, then run <code>/voice</code>.');
+}
+
+els.go.onclick = () => (running ? stop() : start());
+listDevices();
+</script>
+</body>
+</html>
