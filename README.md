@@ -236,6 +236,8 @@ sox tone.wav -n stat                # expect "Rough frequency: 440"
 
 A continuous sine at amplitude 0.366 has an RMS of 0.259. If the measured RMS is materially below that, audio is being replaced by silence somewhere in the pipe. That ratio is what caught the queue-draining bug above.
 
+The tone test **takes over from a connected browser tab** (one streamer at a time), which is what you want — it guarantees the measurement is your tone and nothing else. A live tab streaming into the same pipe interleaves with the tone and produces plausible-looking nonsense: a wrong dominant frequency and a depressed RMS that read like a pipeline bug rather than two sources fighting. When the test finishes, click the mic on your tab to take the microphone back.
+
 ## License
 
 MIT
