@@ -12,18 +12,18 @@ $SUDO apt-get install -y sox pulseaudio pulseaudio-utils libasound2-plugins
 
 # Route ALSA's default capture device to the PulseAudio source. Without this,
 # tools like `rec` find no device at all.
-if [ -e "$HOME/.asoundrc" ] && ! grep -q "virtmic" "$HOME/.asoundrc"; then
+if [ -e "$HOME/.asoundrc" ] && ! grep -q "mictunnel" "$HOME/.asoundrc"; then
     echo "==> Backing up existing ~/.asoundrc to ~/.asoundrc.bak"
     cp "$HOME/.asoundrc" "$HOME/.asoundrc.bak"
 fi
 
 echo "==> Writing ~/.asoundrc"
 cat > "$HOME/.asoundrc" <<'EOF'
-# virtmic: send ALSA's default capture to the PulseAudio `virtmic` source.
+# mictunnel: send ALSA's default capture to the PulseAudio `mictunnel` source.
 pcm.!default {
     type asym
     playback.pcm { type pulse }
-    capture.pcm  { type pulse device virtmic }
+    capture.pcm  { type pulse device mictunnel }
 }
 
 ctl.!default { type pulse }
@@ -40,9 +40,9 @@ autospawn = no
 EOF
 
 echo "==> Installing Python dependency (aiohttp)"
-PY="${VIRTMIC_PYTHON:-python3}"
+PY="${MICTUNNEL_PYTHON:-python3}"
 "$PY" -m pip install --quiet --user aiohttp || \
-    echo "    pip install failed -- install aiohttp yourself, or set VIRTMIC_PYTHON to a venv python"
+    echo "    pip install failed -- install aiohttp yourself, or set MICTUNNEL_PYTHON to a venv python"
 
 echo
 echo "Setup complete. Now run: ./start.sh"

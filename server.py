@@ -15,9 +15,9 @@ from pathlib import Path
 
 from aiohttp import WSMsgType, web
 
-FIFO = os.environ.get("VIRTMIC_FIFO", "/tmp/virtmic.fifo")
-PORT = int(os.environ.get("VIRTMIC_PORT", "8777"))
-RATE = int(os.environ.get("VIRTMIC_RATE", "16000"))
+FIFO = os.environ.get("MICTUNNEL_FIFO", "/tmp/mictunnel.fifo")
+PORT = int(os.environ.get("MICTUNNEL_PORT", "8777"))
+RATE = int(os.environ.get("MICTUNNEL_RATE", "16000"))
 CHANNELS = 1
 FRAME_MS = 20
 FRAME_SAMPLES = RATE * FRAME_MS // 1000
@@ -29,10 +29,10 @@ HERE = Path(__file__).parent
 
 # No token by default: the intended setup is a port reachable only by you (an
 # SSH tunnel, or a private Codespaces forwarded port, where the platform already
-# authenticates you). Set VIRTMIC_REQUIRE_TOKEN=1 whenever the port is exposed
+# authenticates you). Set MICTUNNEL_REQUIRE_TOKEN=1 whenever the port is exposed
 # more broadly -- audio arriving here becomes dictated text on your machine, so
 # an open port is an injection risk, not just a privacy one.
-REQUIRE_TOKEN = os.environ.get("VIRTMIC_REQUIRE_TOKEN") == "1"
+REQUIRE_TOKEN = os.environ.get("MICTUNNEL_REQUIRE_TOKEN") == "1"
 TOKEN_FILE = HERE / "token"
 
 if REQUIRE_TOKEN:
@@ -107,7 +107,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
 
     ws = web.WebSocketResponse(max_msg_size=0)
     await ws.prepare(request)
-    print("[virtmic] browser connected", flush=True)
+    print("[mictunnel] browser connected", flush=True)
 
     async for msg in ws:
         if msg.type == WSMsgType.BINARY:
@@ -117,9 +117,9 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
             except queue.Full:
                 stats["q_full"] += 1  # prefer fresh audio over a backlog
         elif msg.type == WSMsgType.ERROR:
-            print(f"[virtmic] ws error: {ws.exception()}", flush=True)
+            print(f"[mictunnel] ws error: {ws.exception()}", flush=True)
 
-    print("[virtmic] browser disconnected", flush=True)
+    print("[mictunnel] browser disconnected", flush=True)
     return ws
 
 
@@ -147,7 +147,7 @@ def main() -> None:
             web.get("/status", status),
         ]
     )
-    web.run_app(app, host=os.environ.get("VIRTMIC_HOST", "0.0.0.0"), port=PORT)
+    web.run_app(app, host=os.environ.get("MICTUNNEL_HOST", "0.0.0.0"), port=PORT)
 
 
 if __name__ == "__main__":

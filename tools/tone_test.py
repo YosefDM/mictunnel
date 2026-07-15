@@ -18,8 +18,8 @@ import sys
 
 import aiohttp
 
-RATE = int(os.environ.get("VIRTMIC_RATE", "16000"))
-PORT = os.environ.get("VIRTMIC_PORT", "8777")
+RATE = int(os.environ.get("MICTUNNEL_RATE", "16000"))
+PORT = os.environ.get("MICTUNNEL_PORT", "8777")
 FRAME = 128
 FREQ = 440
 AMPLITUDE = 12000  # 0.366 full scale -> RMS 0.259 for a clean sine

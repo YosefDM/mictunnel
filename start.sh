@@ -4,10 +4,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORT="${VIRTMIC_PORT:-8777}"
-FIFO="${VIRTMIC_FIFO:-/tmp/virtmic.fifo}"
-RATE="${VIRTMIC_RATE:-16000}"
-PY="${VIRTMIC_PYTHON:-python3}"
+PORT="${MICTUNNEL_PORT:-8777}"
+FIFO="${MICTUNNEL_FIFO:-/tmp/mictunnel.fifo}"
+RATE="${MICTUNNEL_RATE:-16000}"
+PY="${MICTUNNEL_PYTHON:-python3}"
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 if [ ! -d "$XDG_RUNTIME_DIR" ]; then
@@ -21,15 +21,23 @@ if ! command -v pulseaudio > /dev/null; then
 fi
 
 # --exit-idle-time=-1 keeps the daemon alive with no clients connected.
-pulseaudio --check || pulseaudio --start --exit-idle-time=-1 --disallow-exit
+# Use --daemonize, not --start: `--start` routes through the autospawn path and
+# silently refuses when client.conf sets `autospawn = no` (which setup.sh does,
+# to stop ALSA from spawning a stray daemon with different settings).
+pulseaudio --check 2> /dev/null || pulseaudio --daemonize=yes --exit-idle-time=-1 --disallow-exit
 sleep 1
 
-if ! pactl list sources short | grep -q "\bvirtmic\b"; then
+if ! pulseaudio --check 2> /dev/null; then
+    echo "ERROR: PulseAudio failed to start. Try: pulseaudio -vvv --daemonize=no" >&2
+    exit 1
+fi
+
+if ! pactl list sources short | grep -q "\bmictunnel\b"; then
     rm -f "$FIFO"
     pactl load-module module-pipe-source \
-        source_name=virtmic file="$FIFO" \
+        source_name=mictunnel file="$FIFO" \
         format=s16le rate="$RATE" channels=1 > /dev/null
-    pactl set-default-source virtmic
+    pactl set-default-source mictunnel
 fi
 
 # Kill by listening port rather than command pattern: the server may have been
@@ -48,7 +56,7 @@ if ! curl -sf "localhost:${PORT}/status" > /dev/null; then
     exit 1
 fi
 
-echo "virtmic is up. Open the page in your browser and click the mic:"
+echo "mictunnel is up. Open the page in your browser and click the mic:"
 if [ -n "${CODESPACE_NAME:-}" ]; then
     echo "  https://${CODESPACE_NAME}-${PORT}.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
     echo "  (port ${PORT} must be forwarded -- keep it private)"
