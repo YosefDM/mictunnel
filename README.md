@@ -100,6 +100,33 @@ Hold space to talk. Claude Code shells out to SoX, SoX opens the ALSA default, a
 
 **If `/voice` starts but transcribes nothing or garbage**, the device exists but no audio is reaching it. Ninety percent of the time the browser tab is closed. See Troubleshooting.
 
+### Optional: an `/enable-voice` slash command
+
+The bridge has to be restarted after every container restart, which is easy to forget. You can wrap it in a Claude Code skill so `/enable-voice` brings it up and prints the URL. Save this as `~/.claude/skills/enable-voice/SKILL.md`:
+
+````markdown
+---
+name: enable-voice
+description: Start the mictunnel bridge so /voice works, and print the page URL.
+disable-model-invocation: true
+allowed-tools: Bash(bash:*), Bash(curl:*)
+---
+
+## Bridge status (already executed)
+
+!`bash ~/mictunnel/start.sh 2>&1`
+!`curl -s localhost:8777/status 2>&1`
+
+## Your task
+
+Report the result in a few lines. Lead with the URL from the output. Tell the
+user to open it, click the mic, and keep the tab open, then run `/voice`.
+If `frames_in` is above 0, a tab is already streaming and may just need a
+reload. Do not re-run the script — it has already run.
+````
+
+The `` !`command` `` syntax runs the script *before* Claude reads the skill, so the bridge is already up by the time it replies.
+
 ## After a restart
 
 PulseAudio, the FIFO, and the server are runtime state and don't survive a reboot or container restart. Re-run `./start.sh`. Setup only needs to happen once.

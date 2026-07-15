@@ -44,7 +44,7 @@ fi
 # started via a relative path (so an absolute-path pattern misses it and the new
 # process dies on "address already in use"), while a bare "server.py" pattern is
 # broad enough to match unrelated shells.
-fuser -k "${PORT}/tcp" 2> /dev/null || true
+fuser -k "${PORT}/tcp" > /dev/null 2>&1 || true
 sleep 1
 
 nohup "$PY" "$HERE/server.py" > "$HERE/server.log" 2>&1 &
