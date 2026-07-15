@@ -143,7 +143,11 @@ Check `curl localhost:8777/status`:
 | `trimmed` | Backlog exceeded ~200 ms and was trimmed. Persistent = clock drift between browser and host |
 | `q_full` | Queue overflowed. Should stay 0 |
 
-**Recording is silent, but no errors.** The browser tab is closed or disconnected. This is the most common failure and it looks like a bug rather than a closed tab, because a virtual mic that nobody is feeding is indistinguishable from a quiet room.
+**Recording is silent, but no errors.** The browser tab is closed or disconnected. This is the most common failure and it looks like a bug rather than a closed tab, because a virtual mic that nobody is feeding is indistinguishable from a quiet room. Check `frames_in` — if it isn't climbing, no tab is streaming.
+
+**The page says "Taken over".** Another tab (or another device) claimed the microphone; only one client streams at a time. Click the mic on the tab you want to use, and it takes it back.
+
+**It worked, then stopped after a few minutes in the background.** This should now self-heal — the page re-arms itself after a discard, and a watchdog resumes a suspended audio context. If it still happens, check whether the page shows `Idle` (it was discarded and auto-start didn't fire — the origin may not have persistent mic permission) or `Live` with a frozen level ring (the audio context is suspended and the watchdog isn't recovering). Both are worth [opening an issue](https://github.com/YosefDM/mictunnel/issues) over, with your browser version.
 
 **`rec FAIL sox: no default audio device`.** PulseAudio isn't running or ALSA isn't pointed at it. Re-run `./start.sh`, then check `pactl list sources short` shows `mictunnel`.
 
@@ -176,6 +180,10 @@ SSH forwards ports, not audio devices. Run mictunnel on the server, tunnel the p
 ### Can a VS Code extension or the built-in Simple Browser capture the microphone?
 
 Not in VS Code for the Web (Codespaces in a browser). Webviews are cross-origin iframes rendered without `allow="microphone"`, so `getUserMedia` fails with `NotAllowedError` and no prompt ever appears — see [vscode#303293](https://github.com/microsoft/vscode/issues/303293). Opening a real browser page, which is what mictunnel does, is the standard workaround. VS Code Desktop webviews are Electron and *can* prompt, but that only helps if you're not in the browser.
+
+### Why does the microphone stop working after a few minutes?
+
+Because the browser discarded the tab. Chrome and Edge reclaim memory from backgrounded tabs, and a discarded tab reloads to a fresh page with the microphone released — so the host keeps recording, but records silence, and nothing reports an error. mictunnel works around this: the page plays an inaudible keep-alive tone so it's treated as playing audio, and it re-acquires the microphone automatically if it does get reloaded. You shouldn't have to touch it.
 
 ### Does it work with dictation tools other than Claude Code?
 
@@ -211,6 +219,10 @@ Keep port 8777 reachable only by you: an SSH tunnel, or a *private* Codespaces p
 **Backlog trimming.** Browser and host clocks drift. An unbounded buffer converts drift into steadily growing latency, so the backlog is capped at ~200 ms, keeping the newest audio.
 
 **Non-blocking writes.** When nothing is recording, Pulse stops draining the pipe and it fills. The feeder drops those frames rather than blocking and falling behind realtime.
+
+**Surviving tab discards.** Browsers discard backgrounded tabs to reclaim memory, and a discarded tab reloads to a fresh page with the microphone released — the host then records silence indefinitely, with no error anywhere. The page defends on three fronts: it plays an inaudible keep-alive tone so it counts as playing audio (browsers rarely discard those), it auto-starts on load when the origin already holds mic permission (`getUserMedia` needs no fresh gesture then, so a reloaded tab re-arms itself), and a watchdog resumes a suspended `AudioContext` or rebuilds the audio graph if frames stop arriving.
+
+**One streamer at a time.** Two clients feeding the same queue interleave into noise — audible as mangled, wrong-pitch audio rather than an error. The newest connection wins, and the displaced client is closed with code `4001`, which tells it to stand down. That code is load-bearing: a displaced client that simply reconnected would kick the new one straight back, and two tabs would fight forever.
 
 ## Testing
 
