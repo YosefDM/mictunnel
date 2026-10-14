@@ -56,7 +56,7 @@ Linux host (the remote box), Python 3.8+:
 git clone https://github.com/YosefDM/mictunnel.git
 cd mictunnel
 ./setup.sh     # apt packages + ~/.asoundrc + pulse client.conf
-./start.sh     # starts PulseAudio, the virtual source, and the server
+./start.sh     # starts PulseAudio, the virtual source, a drain reader, and the server
 ```
 
 `start.sh` prints a URL. Open it in your browser, click the mic, and grant permission. **Keep the tab open** — it's what holds the microphone.
@@ -139,7 +139,7 @@ Check `curl localhost:8777/status`:
 |---|---|
 | `frames_in` | Chunks received from the browser. **0 while you're speaking = the tab isn't connected** |
 | `underruns` | Frames where no audio was available, so silence was sent. High while speaking = audio isn't arriving |
-| `dropped` | Pipe was full; normal and expected whenever nothing is recording |
+| `dropped` | Pipe was full, so a frame was discarded. Should stay near 0; climbing = nothing is reading the source (the drain `parec` from `start.sh` isn't running) |
 | `trimmed` | Backlog exceeded ~200 ms and was trimmed. Persistent = clock drift between browser and host |
 | `q_full` | Queue overflowed. Should stay 0 |
 
@@ -218,7 +218,11 @@ Keep port 8777 reachable only by you: an SSH tunnel, or a *private* Codespaces p
 
 **Backlog trimming.** Browser and host clocks drift. An unbounded buffer converts drift into steadily growing latency, so the backlog is capped at ~200 ms, keeping the newest audio.
 
-**Non-blocking writes.** When nothing is recording, Pulse stops draining the pipe and it fills. The feeder drops those frames rather than blocking and falling behind realtime.
+**Non-blocking writes.** If nothing reads the pipe, it fills. The feeder drops those frames rather than blocking and falling behind realtime.
+
+**Draining the source.** When nothing is recording, Pulse stops reading the pipe-source, so the FIFO fills with the first ~2 s of audio that arrives and holds it while newer frames are dropped. The next recording opens with that stale audio: words said between dictations appear at the start of the next prompt. `start.sh` runs a `parec` that reads the source continuously and discards it, which keeps the FIFO empty, so a recorder that attaches later only gets live audio.
+
+**Reopening the FIFO.** If the pipe-source goes away (module unloaded, PulseAudio restarted), writes fail with a broken pipe. The feeder waits for the FIFO to come back and reopens it, instead of dying and leaving the server accepting audio that reaches nothing.
 
 **Surviving tab discards.** Browsers discard backgrounded tabs to reclaim memory, and a discarded tab reloads to a fresh page with the microphone released — the host then records silence indefinitely, with no error anywhere. The page defends on three fronts: it plays an inaudible keep-alive tone so it counts as playing audio (browsers rarely discard those), it auto-starts on load when the origin already holds mic permission (`getUserMedia` needs no fresh gesture then, so a reloaded tab re-arms itself), and a watchdog resumes a suspended `AudioContext` or rebuilds the audio graph if frames stop arriving.
 

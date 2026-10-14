@@ -40,6 +40,15 @@ if ! pactl list sources short | grep -q "\bmictunnel\b"; then
     pactl set-default-source mictunnel
 fi
 
+# Keep the source drained. With nothing recording, Pulse stops reading the FIFO;
+# it fills with ~2 s of whatever was said after the last recording, the server
+# drops everything newer, and the next recording opens with that stale audio. A
+# reader that never stops keeps the FIFO empty, so recorders only get live audio.
+# Restart it on every run: if the source was recreated, Pulse may have moved the
+# old reader to another source, where it would drain the wrong device.
+pkill -f "^parec -d mictunnel " > /dev/null 2>&1 || true
+nohup parec -d mictunnel --rate="$RATE" --channels=1 --format=s16le --raw > /dev/null 2>&1 &
+
 # Kill by listening port rather than command pattern: the server may have been
 # started via a relative path (so an absolute-path pattern misses it and the new
 # process dies on "address already in use"), while a bare "server.py" pattern is
