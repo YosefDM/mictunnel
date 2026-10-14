@@ -7,6 +7,7 @@ rate, substituting silence whenever no client is streaming -- so consumers like
 """
 
 import contextlib
+import errno
 import os
 import queue
 import secrets
@@ -66,9 +67,21 @@ stats = {
 }
 
 
+def open_fifo() -> int:
+    """Open the FIFO for writing, waiting until the pipe-source has it open."""
+    while True:
+        try:
+            return os.open(FIFO, os.O_WRONLY | os.O_NONBLOCK)
+        except OSError as e:
+            # ENOENT: module not loaded yet. ENXIO: FIFO exists but has no reader.
+            if e.errno not in (errno.ENOENT, errno.ENXIO):
+                raise
+            time.sleep(1)
+
+
 def feeder() -> None:
     """Write audio to the FIFO at realtime rate, padding with silence."""
-    fd = os.open(FIFO, os.O_WRONLY | os.O_NONBLOCK)
+    fd = open_fifo()
     next_tick = time.monotonic()
     buf = b""
 
@@ -100,6 +113,16 @@ def feeder() -> None:
             # Pulse isn't draining the pipe (nobody recording). Drop the frame
             # rather than block the feeder and fall behind realtime.
             stats["dropped"] += 1
+        except BrokenPipeError:
+            # The pipe-source closed its end (module unloaded, PulseAudio
+            # restarted). Letting this escape kills the thread while the server
+            # keeps accepting audio that goes nowhere, so wait for it to return.
+            print("[mictunnel] FIFO reader went away; reopening", flush=True)
+            os.close(fd)
+            fd = open_fifo()
+            buf = b""
+            next_tick = time.monotonic()
+            continue
 
         next_tick += FRAME_MS / 1000
         sleep = next_tick - time.monotonic()
